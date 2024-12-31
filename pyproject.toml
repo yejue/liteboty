@@ -1,9 +1,11 @@
 [tool.poetry]
 name = "liteboty"
-version = "0.1.0"
-description = ""
+version = "0.1.0a1"
+description = "LiteBoty 是一个轻量级的机器人开发框架"
 authors = ["yejue <1145331931@qq.com>"]
 readme = "README.md"
+homepage = "https://github.com/yejue/liteboty"
+keywords = ["liteboty", "litebot", "ros", "bot"]
 
 [tool.poetry.dependencies]
 python = "^3.8"
