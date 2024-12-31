@@ -1,0 +1,14 @@
+{
+    "REDIS": {
+        "host": "localhost",
+        "port": 6379
+    },
+    "LOGGING": {
+        "level": "INFO",
+        "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    },
+    "SERVICES": [
+    ],
+    "SERVICE_CONFIG": {
+    }
+}
