@@ -42,7 +42,7 @@ def create(name):
 def create_service(name):
     """创建新服务"""
     template_dir = Path(__file__).parent / "templates"
-    service_dir = name
+    service_dir = Path(name)
 
     if service_dir.exists():
         click.echo(f"Service {name} already exists")
