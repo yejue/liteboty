@@ -24,6 +24,7 @@ class Service:
         self.logger = logging.getLogger(f"liteboty.default")
         self._subscriptions = {}  # 存储订阅信息
         self._running = True
+        self._stopped = threading.Event()  # 添加停止事件标志
 
     def _reconnect(self, max_retries: int = None, initial_backoff: float = 1.0) -> bool:
         """重连 Redis
@@ -111,5 +112,13 @@ class Service:
     def stop(self) -> None:
         """停止服务"""
         self._running = False
+        self._stopped.set()  # 设置停止标志
         if self.subscriber:
             self.subscriber.close()
+
+        self._stopped.set()
+        self.cleanup()  # 调用子类清理方法
+
+    def cleanup(self) -> None:
+        """子类可以覆盖此方法以实现自定义清理逻辑"""
+        pass

@@ -1,7 +1,10 @@
+import json
+
 from pathlib import Path
 from typing import Any, Dict, Optional
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
+from liteboty.core.exceptions import ConfigError
 
 
 class LogConfig(BaseModel):
@@ -27,7 +30,9 @@ class BotConfig(BaseSettings):
     def load_from_json(cls, path: Path) -> 'BotConfig':
         """从JSON文件加载配置"""
         try:
-            return cls.parse_file(path)
+            with open(path, "r", encoding="utf8") as f:
+                json_data = json.load(f)
+            return cls.model_validate(json_data)
         except Exception as e:
             raise ConfigError(f"Failed to load config: {e}")
 
