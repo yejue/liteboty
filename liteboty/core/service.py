@@ -14,10 +14,13 @@ class Service:
             self,
             name: str,
             config: Optional[Dict[str, Any]] = None,
-            redis_client: Optional[redis.Redis] = None
+            global_config: Optional[Dict[str, Any]] = None,
+            redis_client: Optional[redis.Redis] = None,
+            need_redis: bool = False
     ):
         self.name = name
         self.config = config or {}
+        self.global_config = global_config or {}
         self.redis_client = redis_client
         self.subscriber = None
         self.main_thread = None
@@ -25,6 +28,17 @@ class Service:
         self._subscriptions = {}  # 存储订阅信息
         self._running = True
         self._stopped = threading.Event()  # 添加停止事件标志
+
+        if need_redis:
+            self._init_redis()
+
+    def _init_redis(self, redis_client: Optional[redis.Redis] = None) -> None:
+        """初始化 Redis 连接和订阅者"""
+        self.redis_client = redis_client or redis.StrictRedis(
+            host=self.global_config.get('REDIS', {}).get('host', 'localhost'),
+            port=self.global_config.get('REDIS', {}).get('port', 6379)
+        )
+        self.subscriber = self.redis_client.pubsub()
 
     def _reconnect(self, max_retries: int = None, initial_backoff: float = 1.0) -> bool:
         """重连 Redis
@@ -122,3 +136,7 @@ class Service:
     def cleanup(self) -> None:
         """子类可以覆盖此方法以实现自定义清理逻辑"""
         pass
+
+    def publish_message(self, topic, message):
+        """ 发送消息到 Redis 的指定 topic """
+        self.redis_client.publish(topic, message)

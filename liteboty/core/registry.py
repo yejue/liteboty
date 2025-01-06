@@ -9,7 +9,7 @@ class ServiceRegistry:
     """服务注册中心"""
     def __init__(self):
         self._services: Dict[str, Service] = {}
-        self.logger = logging.getLogger("liteboty.default")
+        self.logger = logging.getLogger("liteboty_default")
 
     def register(self, service: Service) -> None:
         """注册服务"""

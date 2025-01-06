@@ -55,13 +55,13 @@ class Bot:
                     "level": self.config.LOGGING.level
                 }
             },
-            "root": {
+            "liteboty_default": {
                 "handlers": ["console"],
                 "level": self.config.LOGGING.level
             }
         })
 
-        self.logger = logging.getLogger("liteboty.default")
+        self.logger = logging.getLogger("liteboty_default")
 
         # 创建Redis客户端
         self.redis_client = redis.Redis(
@@ -139,7 +139,7 @@ class Bot:
                 service_class = getattr(module, class_name)
 
             service_config = self.config.get_service_config(class_name)
-            service = service_class(config=service_config)
+            service = service_class(config=service_config, global_config=self.config.dict())
             self.registry.register(service)
             self.logger.info(f"Loaded service: {service_path}")
         except Exception as e:
