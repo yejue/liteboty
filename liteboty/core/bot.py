@@ -55,9 +55,11 @@ class Bot:
                     "level": self.config.LOGGING.level
                 }
             },
-            "liteboty_default": {
-                "handlers": ["console"],
-                "level": self.config.LOGGING.level
+            "loggers": {
+                "liteboty_default": {
+                    "handlers": ["console"],
+                    "level": self.config.LOGGING.level
+                }
             }
         })
 

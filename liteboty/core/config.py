@@ -1,7 +1,7 @@
 import json
 
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 from liteboty.core.exceptions import ConfigError
@@ -23,7 +23,7 @@ class BotConfig(BaseSettings):
     """机器人配置"""
     REDIS: RedisConfig = Field(default_factory=RedisConfig)
     LOGGING: LogConfig = Field(default_factory=LogConfig)
-    SERVICES: list[str] = []
+    SERVICES: List[str] = []
     SERVICE_CONFIG: Dict[str, Dict[str, Any]] = {}
 
     @classmethod
