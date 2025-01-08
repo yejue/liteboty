@@ -15,13 +15,12 @@ class Service:
             name: str,
             config: Optional[Dict[str, Any]] = None,
             global_config: Optional[Dict[str, Any]] = None,
-            redis_client: Optional[redis.Redis] = None,
-            need_redis: bool = False
+            need_redis: bool = True,  # 控制是否需要 Redis
     ):
         self.name = name
         self.config = config or {}
         self.global_config = global_config or {}
-        self.redis_client = redis_client
+        self.redis_client = None
         self.subscriber = None
         self.main_thread = None
         self.logger = logging.getLogger(f"liteboty.default")
@@ -32,13 +31,22 @@ class Service:
         if need_redis:
             self._init_redis()
 
-    def _init_redis(self, redis_client: Optional[redis.Redis] = None) -> None:
-        """初始化 Redis 连接和订阅者"""
-        self.redis_client = redis_client or redis.StrictRedis(
-            host=self.global_config.get('REDIS', {}).get('host', 'localhost'),
-            port=self.global_config.get('REDIS', {}).get('port', 6379)
+    def _init_redis(self) -> None:
+        """初始化 Redis 连接"""
+        redis_config = self.config.get('REDIS', self.global_config.get('REDIS', {}))
+
+        self.redis_client = redis.Redis(
+            host=redis_config.get('host', 'localhost'),
+            port=redis_config.get('port', 6379),
+            password=redis_config.get('password'),
+            db=redis_config.get('db', 0),
+            socket_timeout=redis_config.get('socket_timeout'),
+            socket_connect_timeout=redis_config.get('socket_connect_timeout'),
+            decode_responses=redis_config.get('decode_responses', False)
         )
+
         self.subscriber = self.redis_client.pubsub()
+        self.logger.info(f"Service {self.name} created Redis client")
 
     def _reconnect(self, max_retries: int = None, initial_backoff: float = 1.0) -> bool:
         """重连 Redis

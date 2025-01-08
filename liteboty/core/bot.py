@@ -65,12 +65,6 @@ class Bot:
 
         self.logger = logging.getLogger("liteboty_default")
 
-        # 创建Redis客户端
-        self.redis_client = redis.Redis(
-            host=self.config.REDIS.host,
-            port=self.config.REDIS.port
-        )
-
         # 添加配置文件监控
         self.observer = Observer()
         handler = ConfigFileHandler(self)
