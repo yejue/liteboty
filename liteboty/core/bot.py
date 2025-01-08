@@ -28,6 +28,54 @@ class ConfigFileHandler(FileSystemEventHandler):
             self.bot.reload_config()
 
 
+def _setup_logging(config: BotConfig) -> None:
+    """设置日志配置
+    Args:
+        config: Bot配置对象
+    """
+    # 基础日志配置
+    log_config = {
+        "version": 1,
+        "formatters": {
+            "default": {
+                "format": config.LOGGING.format
+            }
+        },
+        "handlers": {
+            "console": {
+                "class": "logging.StreamHandler",
+                "formatter": "default",
+                "level": config.LOGGING.level
+            }
+        },
+        "loggers": {
+            "liteboty_default": {
+                "handlers": ["console"],
+                "level": config.LOGGING.level
+            }
+        }
+    }
+
+    # 如果配置了日志目录，添加文件处理器
+    if hasattr(config.LOGGING, 'log_dir') and config.LOGGING.log_dir:
+        log_dir = Path(config.LOGGING.log_dir)
+        print(f"Logging directory: {log_dir}")
+        log_dir.mkdir(exist_ok=True)
+        log_file = log_dir / "liteboty.log"
+
+        log_config["handlers"]["file"] = {
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": str(log_file),
+            "formatter": "default",
+            "level": config.LOGGING.level,
+            "maxBytes": config.LOGGING.max_bytes,
+            "backupCount": config.LOGGING.backup_count
+        }
+        log_config["loggers"]["liteboty_default"]["handlers"].append("file")
+
+    logging.config.dictConfig(log_config)
+
+
 class Bot:
     """LiteBoty机器人主类"""
 
@@ -40,29 +88,8 @@ class Bot:
         self.config = config or BotConfig.load_from_json(Path(config_path))
         self.registry = ServiceRegistry()
 
-        # 设置日志
-        logging.config.dictConfig({
-            "version": 1,
-            "formatters": {
-                "default": {
-                    "format": self.config.LOGGING.format
-                }
-            },
-            "handlers": {
-                "console": {
-                    "class": "logging.StreamHandler",
-                    "formatter": "default",
-                    "level": self.config.LOGGING.level
-                }
-            },
-            "loggers": {
-                "liteboty_default": {
-                    "handlers": ["console"],
-                    "level": self.config.LOGGING.level
-                }
-            }
-        })
-
+        # 设置日志配置
+        _setup_logging(self.config)
         self.logger = logging.getLogger("liteboty_default")
 
         # 添加配置文件监控

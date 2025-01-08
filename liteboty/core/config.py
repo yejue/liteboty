@@ -7,16 +7,24 @@ from pydantic_settings import BaseSettings
 from liteboty.core.exceptions import ConfigError
 
 
-class LogConfig(BaseModel):
-    """日志配置"""
-    level: str = "INFO"
-    format: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-
-
 class RedisConfig(BaseModel):
     """Redis配置"""
     host: str = "localhost"
     port: int = 6379
+    password: Optional[str] = None
+    db: int = 0
+    socket_timeout: Optional[float] = None
+    socket_connect_timeout: Optional[float] = None
+    decode_responses: bool = False
+
+
+class LogConfig(BaseModel):
+    """日志配置"""
+    level: str = "INFO"
+    format: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    log_dir: Optional[str] = None
+    max_bytes: int = 10485760
+    backup_count: int = 5
 
 
 class BotConfig(BaseSettings):
