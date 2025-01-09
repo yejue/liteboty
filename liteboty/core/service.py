@@ -1,8 +1,7 @@
-import time
 import logging
-import threading
+import asyncio
 
-import redis
+import redis.asyncio as aioredis
 
 from typing import Any, Dict, Optional
 
@@ -20,22 +19,24 @@ class Service:
         self.name = name
         self.config = config or {}
         self.global_config = global_config or {}
+        self.logger = logging.getLogger(f"liteboty.default")
+
         self.redis_client = None
         self.subscriber = None
-        self.main_thread = None
-        self.logger = logging.getLogger(f"liteboty.default")
         self._subscriptions = {}  # 存储订阅信息
+
+        # 生命周期控制相关
         self._running = True
-        self._stopped = threading.Event()  # 添加停止事件标志
+        self._task = None
 
         if need_redis:
             self._init_redis()
 
     def _init_redis(self) -> None:
-        """初始化 Redis 连接"""
+        """初始化 Redis 异步连接"""
         redis_config = self.config.get('REDIS', self.global_config.get('REDIS', {}))
 
-        self.redis_client = redis.Redis(
+        self.redis_client = aioredis.Redis(
             host=redis_config.get('host', 'localhost'),
             port=redis_config.get('port', 6379),
             password=redis_config.get('password'),
@@ -48,7 +49,7 @@ class Service:
         self.subscriber = self.redis_client.pubsub()
         self.logger.info(f"Service {self.name} created Redis client")
 
-    def _reconnect(self, max_retries: int = None, initial_backoff: float = 1.0) -> bool:
+    async def _reconnect(self, max_retries: int = None, initial_backoff: float = 1.0) -> bool:
         """重连 Redis
 
         Args:
@@ -63,26 +64,26 @@ class Service:
 
         while self._running:
             try:
-                self.subscriber = self.redis_client.pubsub()
+                self._init_redis()
                 # 重新订阅所有频道
                 for channel, callback in self._subscriptions.items():
-                    self.subscriber.subscribe(**{channel: callback})
+                    await self.subscriber.subscribe(**{channel: callback})
                 self.logger.info("Successfully reconnected to Redis")
                 return True
-            except redis.ConnectionError as e:
+            except aioredis.ConnectionError as e:
                 retries += 1
                 if max_retries is not None and retries >= max_retries:
                     self.logger.error(f"Failed to reconnect after {retries} attempts")
                     return False
 
                 self.logger.warning(f"Reconnection failed, retrying in {backoff}s...")
-                time.sleep(backoff)
+                await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 30)  # 指数退避，最大 30 秒
             except Exception as e:
                 self.logger.error(f"Unexpected error during reconnection: {e}")
                 return False
 
-    def subscribe(self, channel: str, callback: callable) -> None:
+    async def subscribe(self, channel: str, callback: callable) -> None:
         """订阅消息并处理重连
 
         Args:
@@ -96,55 +97,61 @@ class Service:
         self._subscriptions[channel] = callback
 
         # 订阅频道
-        self.subscriber.subscribe(**{channel: callback})
+        await self.subscriber.subscribe(**{channel: callback})
 
         while self._running:
             try:
-                message = self.subscriber.get_message(timeout=0.1)
+                message = await self.subscriber.get_message(timeout=0.1)
                 if message and message['type'] == 'message':
                     try:
-                        callback(message['data'])
+                        await callback(message['data'])
                     except Exception as e:
                         self.logger.error(f"Error in callback: {e}")
-            except redis.ConnectionError as e:
+            except aioredis.ConnectionError as e:
                 self.logger.error(f"Redis connection lost: {e}")
-                if not self._reconnect():
+                if not await self._reconnect():
                     break
             except Exception as e:
                 self.logger.error(f"Unexpected error: {e}")
-                time.sleep(1)
+                await asyncio.sleep(1)
 
-    def start(self):
-        """ 启动应用线程，运行应用逻辑 """
-        thread = threading.Thread(target=self.run)
-        thread.daemon = True
-        thread.start()
-        self.main_thread = thread
+    async def start(self):
+        """启动任务"""
+        self._task = asyncio.create_task(self.run())
 
-    def run(self):
+    async def run(self):
         """ 应用的主逻辑，需要在子类中实现 """
         raise NotImplementedError("需要在子类中覆盖该类")
 
-    def unsubscribe(self, channel: str) -> None:
+    async def unsubscribe(self, channel: str) -> None:
         """取消订阅"""
         if channel in self._subscriptions:
-            self.subscriber.unsubscribe(channel)
+            await self.subscriber.unsubscribe(channel)
             del self._subscriptions[channel]
 
-    def stop(self) -> None:
+    async def stop(self):
         """停止服务"""
         self._running = False
-        self._stopped.set()  # 设置停止标志
-        if self.subscriber:
-            self.subscriber.close()
+        if self._task:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
 
-        self._stopped.set()
-        self.cleanup()  # 调用子类清理方法
+        await self.cleanup()
 
-    def cleanup(self) -> None:
+    async def cleanup(self) -> None:
         """子类可以覆盖此方法以实现自定义清理逻辑"""
         pass
 
-    def publish_message(self, topic, message):
+    async def publish_message(self, topic, message):
         """ 发送消息到 Redis 的指定 topic """
-        self.redis_client.publish(topic, message)
+        try:
+            await self.redis_client.publish(topic, message)
+        except aioredis.ConnectionError:
+            self.logger.error("Redis connection lost while publishing message")
+            if await self._reconnect():
+                await self.redis_client.publish(topic, message)
+        except Exception as e:
+            self.logger.error(f"Error publishing message: {e}")

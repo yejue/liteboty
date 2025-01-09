@@ -25,27 +25,53 @@ class ServiceRegistry:
         """获取所有服务"""
         return list(self._services.values())
 
-    def start_all(self) -> None:
+    async def start_all(self) -> None:
         """启动所有服务"""
         for service in self._services.values():
-            service.start()
+            try:
+                await service.start()
+                self.logger.info(f"Started service: {service.name}")
+            except Exception as e:
+                self.logger.error(f"Failed to start service {service.name}: {e}")
+                raise
 
-    def stop_service(self, service_name: str) -> None:
+    async def stop_all(self) -> None:
+        """停止所有服务"""
+        for service_name in list(self._services.keys()):
+            await self.stop_service(service_name)
+
+    async def stop_service(self, service_name: str) -> None:
         """停止并移除服务"""
         if service := self._services.get(service_name):
             self.logger.info(f"正在停止服务: {service_name}")
-            service.stop()
-            del self._services[service_name]
-            self.logger.info(f"服务已停止并移除: {service_name}")
+            try:
+                await service.stop()
+                del self._services[service_name]
+                self.logger.info(f"服务已停止并移除: {service_name}")
+            except Exception as e:
+                self.logger.error(f"停止服务 {service_name} 时出错: {e}")
+                raise
 
-    def restart_service(self, service_name: str, new_config: dict) -> None:
+    async def restart_service(self, service_name: str, new_config: dict) -> None:
         """重启服务并更新配置"""
         if service := self._services.get(service_name):
             self.logger.info(f"正在重启服务: {service_name}")
-            service.stop()
-            # 更新配置并重启
-            service.config = new_config
-            service._running = True
-            service._stopped.clear()
-            service.start()
-            self.logger.info(f"服务已重启: {service_name}")
+            try:
+                await service.stop()
+                service.config = new_config
+                service._running = True
+                await service.start()
+                self.logger.info(f"服务已重启: {service_name}")
+            except Exception as e:
+                self.logger.error(f"重启服务 {service_name} 时出错: {e}")
+                raise
+
+    def remove_service(self, service_name: str) -> None:
+        """从注册表中移除服务（不停止服务）"""
+        if service_name in self._services:
+            del self._services[service_name]
+            self.logger.info(f"Service removed from registry: {service_name}")
+
+    def has_service(self, service_name: str) -> bool:
+        """检查服务是否存在"""
+        return service_name in self._services
