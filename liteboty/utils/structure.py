@@ -46,3 +46,4 @@ class AsyncQueue:
     def qsize(self) -> int:
         """返回队列当前大小"""
         return self._queue.qsize()
+

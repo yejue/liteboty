@@ -2,9 +2,10 @@ import logging
 import asyncio
 
 import redis.asyncio as aioredis
+import redis
 
 from typing import Any, Dict, Optional
-
+from .utils import TimerLoop
 from .exceptions import ServiceError
 
 
@@ -24,10 +25,11 @@ class Service:
         self.redis_client = None
         self.subscriber = None
         self._subscriptions = {}  # 存储订阅信息
+        self._timers = {}
 
         # 生命周期控制相关
         self._running = True
-        self._task = None
+        self._tasks = []
 
         if need_redis:
             self._init_redis()
@@ -45,7 +47,7 @@ class Service:
             socket_connect_timeout=redis_config.get('socket_connect_timeout'),
             decode_responses=redis_config.get('decode_responses', False)
         )
-
+    
         self.subscriber = self.redis_client.pubsub()
         self.logger.info(f"Service {self.name} created Redis client")
 
@@ -83,41 +85,77 @@ class Service:
                 self.logger.error(f"Unexpected error during reconnection: {e}")
                 return False
 
-    async def subscribe(self, channel: str, callback: callable) -> None:
-        """订阅消息并处理重连
-
+    def add_subscription(self, channel: str, callback: callable):
+        """ 订阅 Redis 的指定 topic 并设置回调
+         
         Args:
             channel: 订阅的频道
             callback: 消息处理回调函数
+         """
+        if channel not in self._subscriptions:
+            self._subscriptions[ channel ] = callback
+    
+    def add_timer(self, timer_name, interval, callback):
+        """ 添加定时器 """
+        if timer_name in self._timers:
+            raise ServiceError(f"Timer {timer_name} already exists")
+
+        self._timers[timer_name] = TimerLoop(timer_name,interval, callback)
+
+    async def start(self, ) -> None:
+        """订阅消息并处理重连
         """
-        if not self.subscriber:
-            raise ServiceError("Redis subscriber not initialized")
+        
+        # print(self.subscriber.channels,self._subscriptions )
+        await self.subscriber.subscribe( **self._subscriptions)
+        self._tasks = [
+            asyncio.create_task(self._timers[timer_name].run())
+            for timer_name in self._timers
+        ] 
+        if len(self._subscriptions) > 0:
+            self._tasks.append(asyncio.create_task(self.subscriber.run()))
+        # print(self.subscriber.channels,self._subscriptions )
 
-        # 保存订阅信息用于重连
-        self._subscriptions[channel] = callback
+        # try:            
+        # await asyncio.gather(*self.tasks)
+        # finally:
+        #     await self.redis_client.aclose()
+        #     await self.subscriber.aclose()
+        #     self.logger.info("Cleaning up...")
 
-        # 订阅频道
-        await self.subscriber.subscribe(**{channel: callback})
+    # async def listen(self):
+    #     if not self.subscriber:
+    #         raise ServiceError("Redis subscriber not initialized")
 
-        while self._running:
-            try:
-                message = await self.subscriber.get_message(timeout=0.1)
-                if message and message['type'] == 'message':
-                    try:
-                        await callback(message['data'])
-                    except Exception as e:
-                        self.logger.error(f"Error in callback: {e}")
-            except aioredis.ConnectionError as e:
-                self.logger.error(f"Redis connection lost: {e}")
-                if not await self._reconnect():
-                    break
-            except Exception as e:
-                self.logger.error(f"Unexpected error: {e}")
-                await asyncio.sleep(1)
+    #     if len(self._subscriptions) == 0:
+    #         self.logger.info(f"应用 {self.name} 未订阅任何频道，即将退出...")
+    #         return
+    #     print(self._subscriptions)
+    #     await self.subscriber.subscribe( **self._subscriptions)
+        # while self._running:
+        #     # try:                
+        #     print(f"Received message:")
+        #     message = await self.subscriber.run(
+        #         ignore_subscribe_messages=True,
+        #         timeout=0.1
+        #     )
+        #     print(f"Received message: {message}")
+        #     # except redis.exceptions.ConnectionError:
+        #     #     self.logger.error(f" 与 Redis 的连接丢失，正在尝试重新连接...")
+        #     #     await self._reconnect()
+        #     #     continue
+        #     if not message:
+        #         # await asyncio.sleep(0.01)
+        #         continue
 
-    async def start(self):
-        """启动任务"""
-        self._task = asyncio.create_task(self.run())
+        #     channel = message.get('channel', None)
+        #     data = message.get('data', None)
+        #     if not channel or not data:
+        #         continue
+        #     channel = channel.decode('utf-8')
+        #     if not channel in self._subscriptions:
+        #         continue
+        #     await self._subscriptions[channel](message)
 
     async def run(self):
         """ 应用的主逻辑，需要在子类中实现 """
@@ -132,14 +170,15 @@ class Service:
     async def stop(self):
         """停止服务"""
         self._running = False
-        if self._task:
-            self._task.cancel()
+        for task in self._tasks:
+            task.cancel()
             try:
-                await self._task
+                await task
             except asyncio.CancelledError:
                 pass
-
         await self.cleanup()
+        await self.redis_client.aclose()
+        await self.subscriber.aclose()
 
     async def cleanup(self) -> None:
         """子类可以覆盖此方法以实现自定义清理逻辑"""
