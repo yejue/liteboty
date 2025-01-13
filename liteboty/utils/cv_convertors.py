@@ -27,3 +27,23 @@ def bytes_to_base64(byte_image):
 
 def base64_to_bytes(base64_image):
     return base64.b64decode(base64_image.encode('utf-8'))
+
+
+def nv12_bytes_to_nv12(nv12_data_bytes, width, height):
+    # NV12 格式: Y平面 + UV平面 (交错存储)
+    # Y平面大小: width * height
+    # UV平面大小: width * height / 2
+
+    y_size = width * height
+
+    # 从字节流中提取 Y 和 UV 平面
+    y_plane = np.frombuffer(nv12_data_bytes[:y_size], dtype=np.uint8).reshape((height, width))
+    uv_plane = np.frombuffer(nv12_data_bytes[y_size:], dtype=np.uint8).reshape((height // 2, width // 2, 2))
+
+    # 合并 Y 和 UV 平面
+    # 这里将 UV 平面和 Y 平面合并成一个单一的 NV12 格式图像
+    nv12_image = np.empty((height + height // 2, width), dtype=np.uint8)
+    nv12_image[:height, :] = y_plane
+    nv12_image[height:, :] = uv_plane.reshape((-1, width))
+
+    return nv12_image
