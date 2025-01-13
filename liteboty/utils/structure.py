@@ -53,16 +53,24 @@ class AsyncQueue:
 class PriorityQueue:
     """使用堆实现的优先级队列"""
 
-    def __init__(self):
+    def __init__(self, max_size=None):
         self._queue = []  # 用于存储队列的堆
         self._index = 0   # 用于确保相同优先级时保持插入顺序
+        self.max_size = max_size  # 设置最大队列大小，默认不限制
 
     def push(self, item, priority):
+        # 如果队列已达到最大大小，移除优先级最低的元素
+        if self.max_size is not None and len(self._queue) >= self.max_size:
+            # 弹出优先级最低的元素（堆中最小的元素）
+            self.pop()
+
         # 插入队列，优先级使用负数来保证堆是降序排序
         heapq.heappush(self._queue, (-priority, self._index, item))
         self._index += 1
 
     def pop(self):
+        if self.qsize() == 0:
+            return None
         # 弹出队列中的最高优先级项
         _, _, item = heapq.heappop(self._queue)
         return item
@@ -101,7 +109,7 @@ class PriorityQueue:
 
 if __name__ == '__main__':
     # 示例代码使用
-    pq = PriorityQueue()
+    pq = PriorityQueue(max_size=10)
 
     # 添加项到队列
     pq.push('task1', 5)
