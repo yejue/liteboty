@@ -104,13 +104,15 @@ class Service:
     async def start(self, ) -> None:
         """订阅消息并处理重连
         """
-        await self.subscriber.subscribe(**self._subscriptions)
         self._tasks = [
             asyncio.create_task(self._timers[timer_name].run())
             for timer_name in self._timers
-        ] 
-        if len(self._subscriptions) > 0:
-            self._tasks.append(asyncio.create_task(self.subscriber.run()))
+        ]
+
+        if self.subscriber:
+            await self.subscriber.subscribe(**self._subscriptions)
+            if len(self._subscriptions) > 0:
+                self._tasks.append(asyncio.create_task(self.subscriber.run()))
 
     async def run(self):
         """ 应用的主逻辑，需要在子类中实现 """
