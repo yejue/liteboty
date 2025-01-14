@@ -104,9 +104,7 @@ class Service:
     async def start(self, ) -> None:
         """订阅消息并处理重连
         """
-        
-        # print(self.subscriber.channels,self._subscriptions )
-        await self.subscriber.subscribe( **self._subscriptions)
+        await self.subscriber.subscribe(**self._subscriptions)
         self._tasks = [
             asyncio.create_task(self._timers[timer_name].run())
             for timer_name in self._timers
