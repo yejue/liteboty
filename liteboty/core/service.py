@@ -114,6 +114,31 @@ class Service:
             if len(self._subscriptions) > 0:
                 self._tasks.append(asyncio.create_task(self.subscriber.run()))
 
+    async def restart_subscriber(self, max_retries: int = 3, initial_backoff: float = 1.0) -> bool:
+        """手动重启 Redis 订阅连接
+
+        Args:
+            max_retries: 最大重试次数，None 表示无限重试
+            initial_backoff: 初始退避时间（秒）
+
+        Returns:
+            bool: 重启是否成功
+        """
+        self.logger.info("Restarting Redis subscriber...")
+        try:
+            # 关闭现有订阅连接
+            if self.subscriber:
+                await self.subscriber.unsubscribe(*self._subscriptions.keys())
+                await self.subscriber.aclose()
+
+            # 重建 Redis 连接和订阅
+            await self._reconnect(max_retries=max_retries, initial_backoff=initial_backoff)
+            self.logger.info("Redis subscriber restarted successfully.")
+            return True
+        except Exception as e:
+            self.logger.error(f"Error restarting Redis subscriber: {e}")
+            return False
+
     async def run(self):
         """ 应用的主逻辑，需要在子类中实现 """
         raise NotImplementedError("需要在子类中覆盖该类")
