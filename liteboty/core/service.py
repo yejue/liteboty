@@ -176,3 +176,42 @@ class Service:
                 await self.redis_client.publish(topic, message)
         except Exception as e:
             self.logger.error(f"Error publishing message: {e}")
+
+    async def get_redis_key(self, key: str) -> Optional[Any]:
+        """获取 Redis 中指定 key 的值"""
+        if not self.redis_client:
+            raise ServiceError("Redis client is not initialized")
+
+        try:
+            value = await self.redis_client.get(key)
+            if value is None:
+                self.logger.warning(f"Key {key} not found in Redis.")
+            return value
+        except aioredis.ConnectionError:
+            self.logger.error("Redis connection lost while getting key")
+            if await self._reconnect():
+                return await self.redis_client.get(key)
+        except Exception as e:
+            self.logger.error(f"Error getting key {key} from Redis: {e}")
+            raise
+
+    async def set_redis_key(self, key: str, value: Any, ex: Optional[int] = None) -> None:
+        """设置 Redis 中指定 key 的值"""
+        if not self.redis_client:
+            raise ServiceError("Redis client is not initialized")
+
+        try:
+            if ex:
+                # 设置键值并设置过期时间，单位为秒
+                await self.redis_client.setex(key, ex, value)
+            else:
+                # 如果没有指定过期时间，直接设置
+                await self.redis_client.set(key, value)
+            self.logger.info(f"Successfully set value for key {key}")
+        except aioredis.ConnectionError:
+            self.logger.error("Redis connection lost while setting key")
+            if await self._reconnect():
+                await self.redis_client.set(key, value)
+        except Exception as e:
+            self.logger.error(f"Error setting key {key} in Redis: {e}")
+            raise
