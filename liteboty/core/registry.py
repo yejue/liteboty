@@ -52,13 +52,14 @@ class ServiceRegistry:
                 self.logger.error(f"停止服务 {service_name} 时出错: {e}")
                 raise
 
-    async def restart_service(self, service_name: str, new_config: dict) -> None:
+    async def restart_service(self, service_name: str, config: dict, global_config: dict) -> None:
         """重启服务并更新配置"""
         if service := self._services.get(service_name):
             self.logger.info(f"正在重启服务: {service_name}")
             try:
                 await service.stop()
-                service.config = new_config
+                service.config = config
+                service.global_config = global_config
                 service._running = True
                 await service.start()
                 self.logger.info(f"服务已重启: {service_name}")

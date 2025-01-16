@@ -33,6 +33,7 @@ class BotConfig(BaseSettings):
     LOGGING: LogConfig = Field(default_factory=LogConfig)
     SERVICES: List[str] = []
     SERVICE_CONFIG: Dict[str, Dict[str, Any]] = {}
+    CONFIG_MAP: Dict[str, str] = {}
 
     @classmethod
     def load_from_json(cls, path: Path) -> 'BotConfig':

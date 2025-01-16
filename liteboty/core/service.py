@@ -101,7 +101,7 @@ class Service:
 
         self._timers[timer_name] = TimerLoop(timer_name,interval, callback)
 
-    async def start(self, ) -> None:
+    async def start(self) -> None:
         """订阅消息并处理重连
         """
         self._tasks = [
@@ -113,6 +113,12 @@ class Service:
             await self.subscriber.subscribe(**self._subscriptions)
             if len(self._subscriptions) > 0:
                 self._tasks.append(asyncio.create_task(self.subscriber.run()))
+
+    async def start_subscriber(self) -> None:
+        """开启订阅"""
+        await self.subscriber.subscribe(**self._subscriptions)
+        if len(self._subscriptions) > 0:
+            self._tasks.append(asyncio.create_task(self.subscriber.run()))
 
     async def restart_subscriber(self, max_retries: int = 3, initial_backoff: float = 1.0) -> bool:
         """手动重启 Redis 订阅连接
@@ -152,15 +158,17 @@ class Service:
     async def stop(self):
         """停止服务"""
         self._running = False
+
         for task in self._tasks:
             task.cancel()
             try:
                 await task
             except asyncio.CancelledError:
+                print("Except  asyncio.CancelledError")
                 pass
         await self.cleanup()
-        await self.redis_client.aclose()
         await self.subscriber.aclose()
+        await self.redis_client.aclose()
 
     async def cleanup(self) -> None:
         """子类可以覆盖此方法以实现自定义清理逻辑"""
