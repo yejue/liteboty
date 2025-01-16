@@ -21,7 +21,7 @@ class RedisConfig(BaseModel):
 class LogConfig(BaseModel):
     """日志配置"""
     level: str = "INFO"
-    format: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    format: str = "%(asctime)s - %(name)s - %(levelname)s - File: %(filename)s - Line: %(lineno)s - %(message)s",
     log_dir: Optional[str] = None
     max_bytes: int = 10485760
     backup_count: int = 5
