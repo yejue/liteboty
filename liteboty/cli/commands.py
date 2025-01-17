@@ -51,3 +51,24 @@ def create_service(name):
     # 复制服务模板
     shutil.copytree(template_dir / "service", service_dir)
     click.echo(f"Created service {name}")
+
+
+@cli.command()
+@click.option('--config', default='config/config.json', help='Path to config file')
+def run(config):
+    """运行 LiteBot"""
+    import asyncio
+    from liteboty.core.bot import Bot
+
+    config_path = Path(config).resolve()
+    if not config_path.exists():
+        click.echo(f"Config file {config_path} does not exist")
+        return
+
+    bot = Bot(config_path=str(config_path))
+
+    try:
+        asyncio.run(bot.run())
+    except KeyboardInterrupt:
+        click.echo("Shutting down...")
+        asyncio.run(bot.stop())

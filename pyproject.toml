@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "liteboty"
-version = "0.1.1b21"
+version = "0.1.1b23"
 description = "LiteBoty 是一个轻量级的机器人开发框架"
 authors = ["yejue <1145331931@qq.com>"]
 readme = "README.md"

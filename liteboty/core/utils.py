@@ -2,18 +2,23 @@ import asyncio
 
 
 class TimerLoop:
-    def __init__(self,  name, interval, callback):
+    def __init__(self,  name, interval, callback, count=None):
         self.interval = interval
         self.callback = callback
         self.name = name
+        self.count = count
 
     def __str__(self):
         return f"TimerLoop({self.name}, {self.interval})"
 
     async def run(self):
+        run_count = 0
         while True:
             start_time = asyncio.get_event_loop().time()
             await self.callback()
             end_time = asyncio.get_event_loop().time()
             elapsed_time = end_time - start_time
             await asyncio.sleep(max(0, self.interval - elapsed_time))
+
+            if self.count is not None:
+                run_count += 1

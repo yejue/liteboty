@@ -94,12 +94,12 @@ class Service:
         if channel not in self._subscriptions:
             self._subscriptions[channel] = callback
     
-    def add_timer(self, timer_name, interval, callback):
+    def add_timer(self, timer_name, interval, callback, count=None):
         """ 添加定时器 """
         if timer_name in self._timers:
             raise ServiceError(f"Timer {timer_name} already exists")
 
-        self._timers[timer_name] = TimerLoop(timer_name,interval, callback)
+        self._timers[timer_name] = TimerLoop(timer_name, interval, callback, count=count)
 
     async def start(self) -> None:
         """订阅消息并处理重连
