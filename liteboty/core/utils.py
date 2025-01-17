@@ -13,7 +13,7 @@ class TimerLoop:
 
     async def run(self):
         run_count = 0
-        while True:
+        while self.count is None or run_count < self.count:
             start_time = asyncio.get_event_loop().time()
             await self.callback()
             end_time = asyncio.get_event_loop().time()
