@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package liteboty;
+
+message Metadata {
+  int64 timestamp = 1;
+  string version = 2;
+  map<string, string> attributes = 3;
+}
+
+message Message {
+  enum Type {
+    UNKNOWN = 0;
+    JSON = 1;
+    IMAGE = 2;
+    BINARY = 3;
+    NUMPY = 4;
+  }
+
+  Type type = 1;
+  Metadata metadata = 2;
+  bytes data = 3;
+}

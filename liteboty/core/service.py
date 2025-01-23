@@ -4,6 +4,7 @@ import asyncio
 import redis.asyncio as aioredis
 
 from typing import Any, Dict, Optional
+from .message import Message, MessageType
 from .utils import TimerLoop
 from .exceptions import ServiceError
 
@@ -174,14 +175,64 @@ class Service:
         """子类可以覆盖此方法以实现自定义清理逻辑"""
         pass
 
-    async def publish_message(self, topic, message):
-        """ 发送消息到 Redis 的指定 topic """
+    async def publish(
+            self,
+            channel: str,
+            data: Any,
+            msg_type: MessageType,
+            metadata: Optional[Dict] = None,
+    ) -> None:
+        """发布数据为消息
+
+        Args:
+            channel: 发布通道
+            data: 要发布的数据
+            msg_type: 消息类型
+            metadata: 元数据字典
+        """
         try:
-            await self.redis_client.publish(topic, message)
+            if metadata is None:
+                metadata = {}
+
+            message = Message(data, msg_type, metadata)
+            await self.publish_message(channel, message)
+        except Exception as e:
+            self.logger.error(f"Error publishing data: {e}")
+            raise
+
+    async def publish_message(self, channel: str, message: Message) -> None:
+        """发布自定义消息
+
+        Args:
+            channel: 发布通道
+            message: Message 对象
+
+        Example:
+            custom_msg = Message(
+                data=my_data,
+                msg_type=MessageType.JSON,
+                metadata={
+                    'custom_field': 'value',
+                    'timestamp': time.time()
+                }
+            )
+            await service.publish_message('/custom/topic', custom_msg)
+        """
+        try:
+            encoded_message = Message.encode(message)
+            await self.redis_client.publish(channel, encoded_message)
+        except Exception as e:
+            self.logger.error(f"Error publishing message: {e}")
+            raise
+
+    async def publish_messages_raw(self, channel: str, message_raw: Any) -> None:
+        """ 发送原始消息到 Redis 的指定 channel """
+        try:
+            await self.redis_client.publish(channel, message_raw)
         except aioredis.ConnectionError:
             self.logger.error("Redis connection lost while publishing message")
             if await self._reconnect():
-                await self.redis_client.publish(topic, message)
+                await self.redis_client.publish(channel, message_raw)
         except Exception as e:
             self.logger.error(f"Error publishing message: {e}")
 
