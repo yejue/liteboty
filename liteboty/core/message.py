@@ -39,8 +39,7 @@ class Message:
         metadata.timestamp = int(time.time() * 1000)  # 毫秒时间戳
         metadata.version = msg.metadata.get('version', '1.0')
         for key, value in msg.metadata.items():
-            if key not in ('timestamp', 'version'):
-                metadata.attributes[key] = str(value)
+            metadata.attributes[key] = str(value)
         proto_msg.metadata.CopyFrom(metadata)
 
         # 处理数据
