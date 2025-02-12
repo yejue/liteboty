@@ -159,17 +159,24 @@ class Service:
     async def stop(self):
         """停止服务"""
         self._running = False
+        for timer in self._timers.values():
+            timer.stop()
 
         for task in self._tasks:
             task.cancel()
             try:
                 await task
             except asyncio.CancelledError:
-                print("Except  asyncio.CancelledError")
-                pass
-        await self.cleanup()
-        await self.subscriber.aclose()
-        await self.redis_client.aclose()
+                self.logger.warning(f"{self.name} Except asyncio.CancelledError")
+                continue
+        try:
+            await self.cleanup()
+            if self.subscriber:
+                await self.subscriber.aclose()
+            if self.redis_client:
+                await self.redis_client.aclose()
+        except Exception as e:
+            self.logger.warning(f"{self.name} service.stop Exception {e}")
 
     async def cleanup(self) -> None:
         """子类可以覆盖此方法以实现自定义清理逻辑"""

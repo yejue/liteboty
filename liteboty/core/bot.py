@@ -16,7 +16,7 @@ class ConfigFileHandler(FileSystemEventHandler):
     def __init__(self, bot):
         self.bot = bot
         self.last_modified = 0
-        self._reload_lock = asyncio.Lock()
+        # self._reload_lock = asyncio.Lock()
 
     def on_modified(self, event):
         if event.src_path == str(self.bot.config_path):
@@ -25,23 +25,8 @@ class ConfigFileHandler(FileSystemEventHandler):
             if current_time - self.last_modified < 1:
                 return
             self.last_modified = current_time
-
-            # 确保在当前事件循环中调度异步任务
-            loop = self.bot.get_loop()
-
-            if loop.is_running():
-                # 如果事件循环正在运行，通过call_soon_threadsafe来调度任务
-                loop.call_soon_threadsafe(asyncio.create_task, self._handle_config_change())
-            else:
-                # 如果没有活动事件循环，创建一个新的事件循环并执行
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                loop.run_until_complete(self._handle_config_change())
-
-    async def _handle_config_change(self):
-        async with self._reload_lock:
-            await self.bot.reload_config()
-
+            # logging.getLogger("liteboty_default").info("File modified")
+            self.bot.set_reload_config()
 
 def _setup_logging(config: BotConfig) -> None:
     """设置日志配置
@@ -99,13 +84,15 @@ class Bot:
             config_path: str = r"config/config.json",
             config: Optional[BotConfig] = None
     ):
+
+        # 记录 Bot 的事件循环
+        self._loop = asyncio.get_event_loop()
         self.config_path = Path(config_path).resolve()
         self.config = config or BotConfig.load_from_json(Path(config_path))
         self.registry = ServiceRegistry()
         self._running = True
 
-        # 记录 Bot 的事件循环
-        self._loop = asyncio.get_event_loop()
+        self.need_to_reload = False
 
         # 设置日志配置
         _setup_logging(self.config)
@@ -115,6 +102,17 @@ class Bot:
         self.observer = Observer()
         handler = ConfigFileHandler(self)
         self.observer.schedule(handler, path=str(Path(config_path).parent.resolve()), recursive=False)
+
+    def set_reload_config(self):
+        self.need_to_reload = True
+
+    async def _check_reload(self):
+        while self._running:
+            # self.logger.info("checking reload")
+            if self.need_to_reload:
+                await self.reload_config()
+                self.need_to_reload = False
+            await asyncio.sleep(0.5)
 
     @staticmethod
     def compare_service_configs_with_map(old_config, new_config) -> list:
@@ -155,28 +153,37 @@ class Bot:
             # TODO: 当前加载服务使用了路径或模块名，而在注册中心注册时用的是 name，这样的结构很难以对这三者进行映射关联
 
             for service_path in old_services - new_services:
-                service_name = service_path.rsplit('.', 1)[1]
-                await self.registry.stop_service(service_name)
+                try:
+                    service_name = service_path.rsplit('.', 1)[1]
+                    await self.registry.stop_service(service_name)
+                except Exception as e:
+                    self.logger.error(f"关闭服务 {service_path} 失败: {e}")
 
             # 处理新增的服务
             for service_path in new_services - old_services:
-                await self._load_service(service_path)
-                service_name = service_path.split('.')[-1]
-                if service := self.registry.get_service(service_name):
-                    await service.start()
-                    self.logger.info(f"新服务已启动: {service_name}")
-
+                try:
+                    await self._load_service(service_path)
+                    service_name = service_path.split('.')[-1]
+                    if service := self.registry.get_service(service_name):
+                        await service.start()
+                        self.logger.info(f"新服务已启动: {service_name}")
+                except Exception as e:
+                    self.logger.error(f"启动服务 {service_path} 失败: {e}")
+                
             # 处理配置变更的服务
             changed_services = self.compare_service_configs_with_map(self.config.dict(), new_config.dict())
             self.logger.info(f"Services to change config：{changed_services}")
 
             for service_path in changed_services:
-                service_name = service_path.rsplit('.', 1)[1]
-                old_service_config = self.config.get_service_config(service_name)
-                new_service_config = new_config.get_service_config(service_name)
+                try:
+                    service_name = service_path.rsplit('.', 1)[1]
+                    old_service_config = self.config.get_service_config(service_name)
+                    new_service_config = new_config.get_service_config(service_name)
 
-                if old_service_config != new_service_config:
-                    await self.registry.restart_service(service_name, new_service_config, new_config)
+                    if old_service_config != new_service_config:
+                        await self.registry.restart_service(service_name, new_service_config, new_config)
+                except Exception as e:
+                    self.logger.error(f"重启服务 {service_path} 失败: {e}")
 
             self.config = new_config
             self.logger.info("配置重新加载完成")
@@ -219,15 +226,23 @@ class Bot:
     async def _load_services(self) -> None:
         """加载所有服务"""
         for service_path in self.config.SERVICES:
-            await self._load_service(service_path)
+            try:
+                await self._load_service(service_path)
+            except Exception as e:
+                self.logger.error(f"Failed to load service {service_path}: {e}")
+                import traceback
+                self.logger.error(traceback.format_exc())
+                continue
 
     async def run(self) -> None:
         """运行机器人"""
         self.logger.info("Starting LiteBoty...")
+        check_reload_loop = None
         try:
             await self._load_services()
             self.observer.start()
             await self.registry.start_all()
+            check_reload_loop = asyncio.create_task(self._check_reload())
 
             # 保持运行直到收到停止信号
             while self._running:
@@ -235,6 +250,8 @@ class Bot:
 
         except asyncio.CancelledError:
             self.logger.info("Received shutdown signal...")
+        except KeyboardInterrupt:
+            self.logger.info(f"KeyboardInterrupt")
         except Exception as e:
             self.logger.error(f"Error: {e}")
             raise LiteBotyException(f"Bot failed: {e}")
@@ -243,6 +260,8 @@ class Bot:
             self.observer.stop()
             self.observer.join()
             await self.registry.stop_all()
+            if check_reload_loop is not None:
+                await check_reload_loop
 
     async def stop(self) -> None:
         """停止机器人"""

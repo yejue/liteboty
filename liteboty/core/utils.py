@@ -22,3 +22,6 @@ class TimerLoop:
 
             if self.count is not None:
                 run_count += 1
+
+    def stop(self):
+        self.count = -1
