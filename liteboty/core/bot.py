@@ -3,7 +3,7 @@ import asyncio
 import logging.config
 
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Set, Dict, Any, List, Tuple
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
@@ -27,6 +27,7 @@ class ConfigFileHandler(FileSystemEventHandler):
             self.last_modified = current_time
             # logging.getLogger("liteboty_default").info("File modified")
             self.bot.set_reload_config()
+
 
 def _setup_logging(config: BotConfig) -> None:
     """设置日志配置
@@ -114,53 +115,69 @@ class Bot:
                 self.need_to_reload = False
             await asyncio.sleep(0.5)
 
-    @staticmethod
-    def compare_service_configs_with_map(old_config, new_config) -> list:
+    def _get_service_changes(self, old_config: BotConfig, new_config: BotConfig) -> Tuple[
+        Set[str], Set[str], List[str]]:
+        """获取服务变更情况
+
+        Args:
+            old_config: 旧配置
+            new_config: 新配置
+
+        Returns:
+            Tuple[Set[str], Set[str], List[str]]: 需要停止的服务、需要启动的服务、配置变更的服务
+        """
+        # 获取旧配置中启用的服务
+        old_services = set(old_config.get_enabled_services())
+        # 获取新配置中启用的服务
+        new_services = set(new_config.get_enabled_services())
+
+        # 计算需要停止和启动的服务
+        services_to_stop = old_services - new_services
+        services_to_start = new_services - old_services
+
+        # 获取配置变更的服务
         changed_services = []
 
-        # 获取 SERVICE_CONFIG 和 CONFIG_MAP 部分
-        old_service_config = old_config.get("SERVICE_CONFIG", {})
-        new_service_config = new_config.get("SERVICE_CONFIG", {})
-        config_map = new_config.get("CONFIG_MAP", {})
+        # 遍历新配置中的服务，检查配置是否变更
+        for service_path in old_services.intersection(new_services):
+            service_name = service_path.rsplit('.', 1)[1]
+            old_service_config = old_config.get_service_config(service_name)
+            new_service_config = new_config.get_service_config(service_name)
 
-        # 遍历SERVICE_CONFIG中的每个服务
-        for service, config in old_service_config.items():
-            # 如果在 new_config 中没有该服务，或者配置内容不同，认为服务发生了变化
-            if service not in new_service_config or old_service_config[service] != new_service_config[service]:
-                changed_services.append(service)
+            if old_service_config != new_service_config:
+                changed_services.append(service_path)
 
-        # 使用CONFIG_MAP来找到实际的服务名称
-        mapped_services = []
-        for service in changed_services:
-            if service in config_map:
-                mapped_services.append(config_map[service])
-
-        return mapped_services
+        return services_to_stop, services_to_start, changed_services
 
     async def reload_config(self) -> None:
         """重新加载配置并更新服务"""
         self.logger.info("检测到配置文件变更，正在重新加载...")
         try:
             new_config = BotConfig.load_from_json(Path(self.config_path))
-            old_services = set(self.config.SERVICES)
-            new_services = set(new_config.SERVICES)
 
-            # 处理被移除的服务
-            self.logger.info("Services to offload: {}".format(old_services - new_services))
-            self.logger.info("Services to onload: {}".format(new_services - old_services))
+            # 获取服务变更情况
+            services_to_stop, services_to_start, changed_services = self._get_service_changes(self.config, new_config)
 
-            # TODO: 应该有一个更好的配置结构，以优化 module_path 和 service_config 的映射
-            # TODO: 当前加载服务使用了路径或模块名，而在注册中心注册时用的是 name，这样的结构很难以对这三者进行映射关联
+            self.logger.info(f"Services to stop: {services_to_stop}")
+            self.logger.info(f"Services to start: {services_to_start}")
+            self.logger.info(f"Services to restart: {changed_services}")
 
-            for service_path in old_services - new_services:
+            # 停止需要停止的服务
+            for service_path in services_to_stop:
                 try:
                     service_name = service_path.rsplit('.', 1)[1]
                     await self.registry.stop_service(service_name)
+                    self.logger.info(f"服务已停止: {service_name}")
                 except Exception as e:
                     self.logger.error(f"关闭服务 {service_path} 失败: {e}")
 
-            # 处理新增的服务
-            for service_path in new_services - old_services:
+            # 启动新增的服务（按优先级排序）
+            sorted_services_to_start = sorted(
+                services_to_start,
+                key=lambda s: new_config.SERVICE_PRIORITIES.get(s, 100)
+            )
+
+            for service_path in sorted_services_to_start:
                 try:
                     await self._load_service(service_path)
                     service_name = service_path.split('.')[-1]
@@ -169,22 +186,18 @@ class Bot:
                         self.logger.info(f"新服务已启动: {service_name}")
                 except Exception as e:
                     self.logger.error(f"启动服务 {service_path} 失败: {e}")
-                
-            # 处理配置变更的服务
-            changed_services = self.compare_service_configs_with_map(self.config.dict(), new_config.dict())
-            self.logger.info(f"Services to change config：{changed_services}")
 
+            # 重启配置变更的服务
             for service_path in changed_services:
                 try:
                     service_name = service_path.rsplit('.', 1)[1]
-                    old_service_config = self.config.get_service_config(service_name)
                     new_service_config = new_config.get_service_config(service_name)
-
-                    if old_service_config != new_service_config:
-                        await self.registry.restart_service(service_name, new_service_config, new_config)
+                    await self.registry.restart_service(service_name, new_service_config, new_config.dict())
+                    self.logger.info(f"服务已重启: {service_name}")
                 except Exception as e:
                     self.logger.error(f"重启服务 {service_path} 失败: {e}")
 
+            # 更新配置
             self.config = new_config
             self.logger.info("配置重新加载完成")
 
@@ -224,8 +237,12 @@ class Bot:
             raise
 
     async def _load_services(self) -> None:
-        """加载所有服务"""
-        for service_path in self.config.SERVICES:
+        """加载所有启用的服务"""
+        # 获取按优先级排序后的服务列表
+        sorted_services = self.config.get_sorted_services()
+        self.logger.info(f"Loading services in order: {sorted_services}")
+
+        for service_path in sorted_services:
             try:
                 await self._load_service(service_path)
             except Exception as e:
@@ -261,7 +278,11 @@ class Bot:
             self.observer.join()
             await self.registry.stop_all()
             if check_reload_loop is not None:
-                await check_reload_loop
+                check_reload_loop.cancel()
+                try:
+                    await check_reload_loop
+                except asyncio.CancelledError:
+                    pass
 
     async def stop(self) -> None:
         """停止机器人"""

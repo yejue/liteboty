@@ -61,10 +61,11 @@ liteboty create mybot
 ```
 
 #### 4. 配置项目
-在项目目录下，你会找到一个 `config` 文件夹，其中包含一个 `config.json` 文件。这个文件是项目的配置文件，以下为现在要使用的配置文件，在这个步骤中，还不需要关注具体配置是什么意思，只需要复制到你的项目中即可
+在项目目录下，你会找到一个 `config` 文件夹，其中包含一个 `config.json` 文件。以下是推荐使用的新版本（2.0）配置文件示例：
 
 ```json
 {
+    "version": "2.0",
     "REDIS": {
         "host": "localhost",
         "port": 6379,
@@ -77,16 +78,14 @@ liteboty create mybot
         "max_bytes": 10485760,
         "backup_count": 5
     },
-    "SERVICES": [
-        ".services.hello.service.HelloService"
-    ],
-    "SERVICE_CONFIG": {
-        "HelloService": {
-            "welcome_text": "hello liteboty!"
+    "SERVICES": {
+        ".services.hello.service.HelloService": {
+            "enabled": true,
+            "priority": 50,
+            "config": {
+                "welcome_text": "hello liteboty!"
+            }
         }
-    },
-    "CONFIG_MAP": {
-        "HelloService": ".services.hello.service.HelloService"
     }
 }
 ```
@@ -105,7 +104,6 @@ class HelloService(Service):
 
     def say_somthing(self):
         self.config.get("welcome_text", "hello...")
-
 ```
 
 #### 6. 运行项目
@@ -115,7 +113,50 @@ liteboty run --config config/config.json
 ```
 项目启动后，你应该能看到 `"hello liteboty!"` 的输出，这表示你的第一个服务已经成功运行。
 
-### config.json
+### 配置文件格式
+
+LiteBoty 支持两种配置文件格式：新版本（2.0）和旧版本（1.0）。新版本配置格式提供了更多功能，如服务启停控制和启动优先级设置，推荐使用。
+
+#### 新版本配置格式（2.0）
+
+```json
+{
+    "version": "2.0",
+    "REDIS": {
+        "host": "localhost",
+        "port": 6379,
+        "password": null
+    },
+    "LOGGING": {
+        "level": "DEBUG",
+        "format": "%(asctime)s - %(name)s - %(levelname)s - File: %(filename)s - Line: %(lineno)s - %(message)s",
+        "log_dir": "logs",
+        "max_bytes": 10485760,
+        "backup_count": 5
+    },
+    "SERVICES": {
+        "liteboty_sg_tts_service.service.TTSService": {
+            "enabled": true,
+            "priority": 90
+        },
+        "liteboty_sg_mipicam_capture_service.service.MIPICamCaptureService": {
+            "enabled": true,
+            "priority": 99,
+            "config": {
+                "frame_width": 640,
+                "frame_height": 480,
+                "capture_fps": 15
+            }
+        },
+        "liteboty_sg_segment_service.service.SegService": {
+            "enabled": true,
+            "priority": 100
+        }
+    }
+}
+```
+
+#### 旧版本配置格式（1.0）
 
 ```json
 {
@@ -145,28 +186,92 @@ liteboty run --config config/config.json
 }
 ```
 
-#### 整体概述
-这个 JSON 文件是 LiteBoty 框架的配置文件，包含了多个关键配置项，用于配置 Redis 连接、日志记录、服务列表、服务配置以及服务路径映射等信息。
+#### 配置项详解
 
-#### 各配置项详细说明
+##### `version`
+- 配置文件版本，用于区分新旧配置格式
+- `"2.0"`: 新版本格式（推荐）
+- `"1.0"`: 旧版本格式
 
 ##### `REDIS`
-这部分配置用于设置 Redis 连接的相关信息，具体如下：
-- `host`：Redis 服务器的主机地址，这里设置为 `localhost`，表示使用本地的 Redis 服务器。
-- `port`：Redis 服务器的端口号，设置为 `6379`，这是 Redis 的默认端口。
-- `password`：Redis 服务器的连接密码，设置为 `null` 表示不需要密码进行连接。
+Redis 连接配置：
+- `host`: Redis 服务器主机地址
+- `port`: Redis 服务器端口
+- `password`: Redis 连接密码（如不需要密码则为 null）
+- `db`: Redis 数据库索引
+- `socket_timeout`: 连接超时时间
+- `socket_connect_timeout`: 连接建立超时时间
+- `decode_responses`: 是否自动解码响应
 
 ##### `LOGGING`
-此部分配置用于设置日志记录的相关信息，包括日志级别、日志格式、日志存储目录、日志文件的最大大小和备份数量等：
-- `level`：日志级别，设置为 `DEBUG`，表示会记录详细的调试信息。
-- `format`：日志的输出格式，包含时间、日志记录器名称、日志级别、文件名、行号和具体的日志信息。
-- `log_dir`：日志文件存储的目录，设置为 `logs`，表示日志文件将存储在项目根目录下的 `logs` 文件夹中。
-- `max_bytes`：单个日志文件的最大大小，设置为 `10485760` 字节（即 10MB）。
-- `backup_count`：日志文件的最大备份数量，设置为 `5`，表示当日志文件达到最大大小时，会自动进行轮转备份，最多保留 5 个备份文件。
+日志配置：
+- `level`: 日志级别（DEBUG, INFO, WARNING, ERROR, CRITICAL）
+- `format`: 日志格式
+- `log_dir`: 日志文件目录
+- `max_bytes`: 单个日志文件最大大小
+- `backup_count`: 日志文件备份数量
 
-##### `SERVICES`
-这是一个列表，用于指定需要加载的服务的路径。在这个配置中，只有一个服务路径：
-- `".services.hello.service.HelloService"`：表示需要加载的服务是 `HelloService`，其路径为 `.services.hello.service`。
+##### `SERVICES` (新版本格式)
+服务配置，每个服务包含以下字段：
+- `enabled`: 是否启用该服务（true/false）
+- `priority`: 服务启动优先级（数字越小优先级越高）
+- `config`: 服务特定配置（可选）
+
+##### `SERVICES` (旧版本格式)
+服务路径列表，每个元素是一个服务的导入路径。
+
+##### `SERVICE_CONFIG` (旧版本格式)
+服务配置字典，键为服务名称，值为服务特定配置。
+
+##### `CONFIG_MAP` (旧版本格式)
+服务名称到服务路径的映射。
+
+### 服务优先级
+
+在新版本配置（2.0）中，你可以通过 `priority` 字段设置服务的启动优先级。数字越小，优先级越高，服务会越早启动。这对于有依赖关系的服务非常有用，例如数据库服务应该在使用数据库的服务之前启动。
+
+默认情况下，所有服务的优先级为 100。如果多个服务具有相同的优先级，它们的启动顺序是不确定的。
+
+示例：
+```json
+"SERVICES": {
+    "liteboty_sg_tts_service.service.TTSService": {
+        "enabled": true,
+        "priority": 90
+    },
+    "liteboty_sg_mipicam_capture_service.service.MIPICamCaptureService": {
+        "enabled": true,
+        "priority": 99
+    }
+}
+```
+
+在这个例子中，`TTSService` 会先于 `MIPICamCaptureService` 启动。
+
+### 服务启停控制
+
+新版本配置（2.0）允许你通过 `enabled` 字段控制服务是否启用。这使得你可以在不修改代码的情况下，通过配置文件启用或禁用特定服务。
+
+```json
+"liteboty_sg_segment_service.service.SegService": {
+    "enabled": false,
+    "priority": 100
+}
+```
+
+在这个例子中，`SegService` 将不会被加载和启动。
+
+### 配置热重载
+
+LiteBoty 支持配置热重载，当配置文件发生变更时，框架会自动检测并重新加载配置。这包括：
+
+1. 停止已禁用的服务
+2. 启动新启用的服务
+3. 重启配置发生变更的服务
+
+这使得你可以在不重启整个应用的情况下，动态调整服务的配置和启停状态。
+
+### 服务导入方式
 
 在 LiteBoty 中，SERVICES 配置项用于指定需要加载的服务。它支持两种导入方式：路径导入和 module 导入。
 
@@ -175,9 +280,13 @@ liteboty run --config config/config.json
 如果服务的导入路径以 "." 开头，则表示使用路径导入。路径导入适用于项目内部自定义的服务。例如：
 
 ```json
-"SERVICES": [
-    ".services.hello.service.HelloService"
-]
+".services.hello.service.HelloService": {
+    "enabled": true,
+    "priority": 50,
+    "config": {
+        "welcome_text": "hello liteboty!"
+    }
+}
 ```
 
 在这个例子中，".services.hello.service.HelloService" 表示从项目内部的相对路径中导入 HelloService 服务。
@@ -187,25 +296,10 @@ liteboty run --config config/config.json
 如果服务的导入路径不带 "." 开头，则表示使用 module 导入。module 导入适用于通过 pip 安装的第三方服务。例如：
 
 ```json
-"SERVICES": [
-    "external_service_module.ExternalService"
-]
+"liteboty_sg_tts_service.service.TTSService": {
+    "enabled": true,
+    "priority": 90
+}
 ```
 
-在这个例子中，"external_service_module.ExternalService" 表示从通过 pip 安装的 external_service_module 模块中导入 ExternalService 服务。
-
-
-##### `SERVICE_CONFIG`
-这是一个字典，用于为每个服务配置特定的参数。在这个配置中，为 `HelloService` 服务配置了一个参数：
-- `"HelloService"`：服务的名称。
-  - `"welcome_text"`：服务的配置参数，值为 `"hello liteboty!"`，可以在 `HelloService` 服务中使用这个参数。
-
-##### `CONFIG_MAP`
-这是一个字典，用于建立服务名称和服务路径之间的映射关系。在这个配置中，只有一个映射关系：
-- `"HelloService"`：服务的名称。
-  - `".services.hello.service.HelloService"`：服务的路径。
-
-这个映射关系的作用是在 `watchdog` 监测到配置文件变更时，决定需要重载哪个服务。由于在注册中心 `registry` 中使用服务名称（`Service Name`）作为键来存储服务，而在 `_load_service` 方法中使用的是服务路径（`service path`），所以需要通过这个映射关系来确定服务重载时使用的正确路径。
-
-#### 关于 `CONFIG_MAP` 的设计缺陷说明
-当前的 `CONFIG_MAP` 设计是由于前期设计的遗漏产生的一个缺陷。在理想情况下，注册中心和服务加载过程应该使用统一的标识（服务名称或服务路径），避免出现这种需要额外映射的情况。在后续的开发中，会对这部分进行合理化改进，以提高代码的一致性和可维护性。
+在这个例子中，"liteboty_sg_tts_service.service.TTSService" 表示从通过 pip 安装的 liteboty_sg_tts_service 模块中导入 TTSService 服务。
