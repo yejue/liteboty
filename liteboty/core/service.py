@@ -1,3 +1,5 @@
+import time
+
 import logging
 import asyncio
 
@@ -6,7 +8,7 @@ import redis.asyncio as aioredis
 from typing import Any, Dict, Optional
 from .message import Message, MessageType
 from .utils import TimerLoop
-from .exceptions import ServiceError
+from .exceptions import ServiceError, ConfigError
 
 
 class Service:
@@ -17,6 +19,9 @@ class Service:
             global_config: Optional[Dict[str, Any]] = None,
             need_redis: bool = True,  # 控制是否需要 Redis
     ):
+        self.required_inputs = []
+        self.required_outputs = []
+
         self.name = name
         self.config = config or {}
         self.global_config = global_config or {}
@@ -30,9 +35,60 @@ class Service:
         # 生命周期控制相关
         self._running = True
         self._tasks = []
+        self._start_time = time.time()
+
+        # heartbeat config
+        self.heartbeat_interval = self.global_config.get("HEARTBEAT", {}).get("interval", 30)  # 默认 30s
+        self.heartbeat_enabled = self.global_config.get("HEARTBEAT", {}).get("enabled", True)  # 默认启用 heartbeat
+        self.heartbeat_key_prefix = "liteboty:heartbeat:"
 
         if need_redis:
             self._init_redis()
+            # 心跳定时器
+            if self.heartbeat_enabled:
+                self.add_timer("heartbeat", self.heartbeat_interval, self.send_heartbeat)
+
+        # 服务所需要的 inputs 和 outputs 配置检查
+        # 如果服务中定义了 require_inputs 和 require_outputs 的话
+
+        self._check_io_config()
+
+    async def send_heartbeat(self):
+        """
+        发送服务心跳到 Redis
+        将服务状态信息写入 Redis，键名格式为 "liteboty:heartbeat:{service_name}"
+        """
+        if not self.redis_client:
+            return
+        try:
+            import time
+            import json
+
+            heartbeat_data = {
+                "name": self.name,
+                "timestamp": time.time(),
+                "status": "running" if self._running else "stopping",
+                "uptime": time.time() - getattr(self, "_start_time", time.time())
+            }
+            heartbeat_key = f"{self.heartbeat_key_prefix}{self.name}"
+            await self.redis_client.set(heartbeat_key, json.dumps(heartbeat_data))
+            await self.redis_client.expire(heartbeat_key, self.heartbeat_interval*2)  # 设置 TTL 为心跳间隔的 2 倍
+            self.logger.debug(f"send heartbeat: {heartbeat_data}")
+
+        except Exception as e:
+            self.logger.error(f"心跳发送失败: {e}")
+
+    def _check_io_config(self):
+        """检查输入输出配置"""
+        inputs = self.config.get("inputs", {})
+        for key in getattr(self, "required_inputs", []):
+            if key not in inputs:
+                raise ConfigError(f"Service [{self.name}] 缺少输入配置: {key}")
+        # 检查输出
+        outputs = self.config.get("outputs", {})
+        for key in getattr(self, "required_outputs", []):
+            if key not in outputs:
+                raise ConfigError(f"Service [{self.name}] 缺少输出配置: {key}")
 
     def _init_redis(self) -> None:
         """初始化 Redis 异步连接"""
@@ -105,6 +161,7 @@ class Service:
     async def start(self) -> None:
         """订阅消息并处理重连
         """
+
         self._tasks = [
             asyncio.create_task(self._timers[timer_name].run())
             for timer_name in self._timers
@@ -159,6 +216,11 @@ class Service:
     async def stop(self):
         """停止服务"""
         self._running = False
+
+        # 停止时发送最终心跳
+        if self.heartbeat_enabled and self.redis_client:
+            await self.send_heartbeat()
+
         for timer in self._timers.values():
             timer.stop()
 

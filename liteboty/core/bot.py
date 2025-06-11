@@ -1,15 +1,18 @@
+import sys
+import importlib
 import time
 import asyncio
 import logging.config
 
 from pathlib import Path
-from typing import Optional, Set, Dict, Any, List, Tuple
+from typing import Optional, Set, List, Tuple
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
 from .config import BotConfig
 from .registry import ServiceRegistry
 from .exceptions import LiteBotyException
+from .utils import get_service_name_from_path
 
 
 class ConfigFileHandler(FileSystemEventHandler):
@@ -115,7 +118,8 @@ class Bot:
                 self.need_to_reload = False
             await asyncio.sleep(0.5)
 
-    def _get_service_changes(self, old_config: BotConfig, new_config: BotConfig) -> Tuple[
+    @staticmethod
+    def _get_service_changes(old_config: BotConfig, new_config: BotConfig) -> Tuple[
         Set[str], Set[str], List[str]]:
         """获取服务变更情况
 
@@ -140,7 +144,7 @@ class Bot:
 
         # 遍历新配置中的服务，检查配置是否变更
         for service_path in old_services.intersection(new_services):
-            service_name = service_path.rsplit('.', 1)[1]
+            service_name = get_service_name_from_path(service_path)
             old_service_config = old_config.get_service_config(service_name)
             new_service_config = new_config.get_service_config(service_name)
 
@@ -165,7 +169,7 @@ class Bot:
             # 停止需要停止的服务
             for service_path in services_to_stop:
                 try:
-                    service_name = service_path.rsplit('.', 1)[1]
+                    service_name = get_service_name_from_path(service_path)
                     await self.registry.stop_service(service_name)
                     self.logger.info(f"服务已停止: {service_name}")
                 except Exception as e:
@@ -180,7 +184,7 @@ class Bot:
             for service_path in sorted_services_to_start:
                 try:
                     await self._load_service(service_path)
-                    service_name = service_path.split('.')[-1]
+                    service_name = get_service_name_from_path(service_path)
                     if service := self.registry.get_service(service_name):
                         await service.start()
                         self.logger.info(f"新服务已启动: {service_name}")
@@ -190,9 +194,11 @@ class Bot:
             # 重启配置变更的服务
             for service_path in changed_services:
                 try:
-                    service_name = service_path.rsplit('.', 1)[1]
+                    service_name = get_service_name_from_path(service_path)
+                    self.logger.debug(f"changed service: {service_name}")
                     new_service_config = new_config.get_service_config(service_name)
-                    await self.registry.restart_service(service_name, new_service_config, new_config.dict())
+                    self.logger.debug(f"new_servie_config: {new_service_config}")
+                    await self.registry.restart_service(service_name, new_service_config, new_config.model_dump())
                     self.logger.info(f"服务已重启: {service_name}")
                 except Exception as e:
                     self.logger.error(f"重启服务 {service_path} 失败: {e}")
@@ -207,28 +213,29 @@ class Bot:
             self.logger.error(traceback.format_exc())
 
     async def _load_service(self, service_path: str) -> None:
-        """加载单个服务"""
+        """加载单个服务，支持本地包和标准包，自动注册到 registry"""
         try:
-            # 检查是否是相对导入
+            # 1. 导入包，获取 service_entry
             if service_path.startswith('.'):
-                import sys
-                project_root = Path.cwd()
-                sys.path.insert(0, str(project_root))
-
+                package_name = service_path.lstrip('.')
+                sys.path.insert(0, str(Path.cwd()))
                 try:
-                    module_path = service_path.rsplit('.', 1)[0].lstrip('.')
-                    class_name = service_path.rsplit('.', 1)[1]
-                    module = __import__(module_path, fromlist=[class_name])
-                    service_class = getattr(module, class_name)
+                    module = importlib.import_module(package_name)
                 finally:
                     sys.path.pop(0)
             else:
-                module_path, class_name = service_path.rsplit('.', 1)
-                module = __import__(module_path, fromlist=[class_name])
-                service_class = getattr(module, class_name)
+                module = importlib.import_module(service_path)
 
-            service_config = self.config.get_service_config(class_name)
-            service = service_class(config=service_config, global_config=self.config.dict())
+            if not hasattr(module, "service_entry"):
+                raise ImportError(f"Service 包 {service_path} 必须在 __init__.py 暴露 service_entry")
+            service_class = getattr(module, "service_entry")
+
+            # 2. 用 service_name（包名）查 config
+            service_name = get_service_name_from_path(service_path)
+            service_config = self.config.get_service_config(service_name)
+
+            # 3. 实例化并注册
+            service = service_class(config=service_config, global_config=self.config.model_dump())
             self.registry.register(service)
             self.logger.info(f"Loaded service: {service_path}")
 

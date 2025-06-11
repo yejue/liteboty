@@ -25,3 +25,10 @@ class TimerLoop:
 
     def stop(self):
         self.count = -1
+
+
+def get_service_name_from_path(service_path: str) -> str:
+    if service_path.startswith("."):
+        service_name = service_path[1:]
+        return service_name
+    return service_path

@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings
 
 from liteboty.core.exceptions import ConfigError
+from .utils import get_service_name_from_path
 
 
 class RedisConfig(BaseModel):
@@ -123,7 +124,7 @@ class BotConfig(BaseSettings):
                     service_list.append(service_path)
 
                 # 提取服务名称
-                service_name = service_path.rsplit('.', 1)[1]
+                service_name = get_service_name_from_path(service_path)
 
                 # 处理配置
                 if isinstance(service_item, dict):
