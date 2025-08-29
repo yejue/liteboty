@@ -3,9 +3,13 @@ import importlib
 import time
 import asyncio
 import logging.config
+import json
 
 from pathlib import Path
 from typing import Optional, Set, List, Tuple
+
+import redis.asyncio as aioredis
+
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
@@ -98,6 +102,10 @@ class Bot:
 
         self.need_to_reload = False
 
+        # Add Redis client for service list management
+        self.redis_client = None
+        self._init_redis()
+
         # 设置日志配置
         _setup_logging(self.config)
         self.logger = logging.getLogger("liteboty_default")
@@ -106,6 +114,62 @@ class Bot:
         self.observer = Observer()
         handler = ConfigFileHandler(self)
         self.observer.schedule(handler, path=str(Path(config_path).parent.resolve()), recursive=False)
+
+    def _init_redis(self) -> None:
+        """Initialize Redis connection for service list management"""
+        try:
+            redis_config = self.config.REDIS.model_dump()
+            self.redis_client = aioredis.Redis(
+                host=redis_config.get('host', 'localhost'),
+                port=redis_config.get('port', 6379),
+                password=redis_config.get('password'),
+                db=redis_config.get('db', 0),
+                socket_timeout=redis_config.get('socket_timeout'),
+                socket_connect_timeout=redis_config.get('socket_connect_timeout'),
+                decode_responses=redis_config.get('decode_responses', False)
+            )
+        except Exception as e:
+            self.logger.warning(f"Failed to initialize Redis client: {e}")
+            self.redis_client = None
+
+    async def _update_service_list_in_redis(self, action: str = "update") -> None:
+        """Update service list in Redis
+
+        Args:
+            action: "update" for full update, "remove_all" for cleanup
+        """
+        if not self.redis_client:
+            return
+
+        try:
+            service_key = "liteboty:services"
+
+            if action == "remove_all":
+                await self.redis_client.delete(service_key)
+                self.logger.info("Cleared liteboty service list from Redis")
+                return
+
+            # Get all services from registry
+            services = self.registry.get_all_services()
+            service_list = []
+
+            for service in services:
+                service_info = {
+                    "name": service.name,
+                    "status": "running" if service._running else "stopped",
+                    "start_time": getattr(service, '_start_time', None),
+                    "uptime": time.time() - getattr(service, '_start_time', time.time()),
+                    "last_update": time.time()
+                }
+                service_list.append(service_info)
+
+            # Store as JSON string in Redis
+            await self.redis_client.set(service_key, json.dumps(service_list))
+            await self.redis_client.expire(service_key, 3600)  # Expire in 1 hour
+            self.logger.debug(f"Updated liteboty service list in Redis: {len(service_list)} services")
+
+        except Exception as e:
+            self.logger.error(f"Failed to update service list in Redis: {e}")
 
     def set_reload_config(self):
         self.need_to_reload = True
@@ -207,6 +271,9 @@ class Bot:
             self.config = new_config
             self.logger.info("配置重新加载完成")
 
+            # Update service list in Redis after reload
+            await self._update_service_list_in_redis()
+
         except Exception as e:
             self.logger.error(f"重新加载配置失败: {e}")
             import traceback
@@ -258,6 +325,9 @@ class Bot:
                 self.logger.error(traceback.format_exc())
                 continue
 
+        # Update service list in Redis after loading all services
+        await self._update_service_list_in_redis()
+
     async def run(self) -> None:
         """运行机器人"""
         self.logger.info("Starting LiteBoty...")
@@ -266,6 +336,10 @@ class Bot:
             await self._load_services()
             self.observer.start()
             await self.registry.start_all()
+
+            # Update service list after all services started
+            await self._update_service_list_in_redis()
+
             check_reload_loop = asyncio.create_task(self._check_reload())
 
             # 保持运行直到收到停止信号
@@ -284,6 +358,13 @@ class Bot:
             self.observer.stop()
             self.observer.join()
             await self.registry.stop_all()
+
+            # Clean up service list from Redis
+            await self._update_service_list_in_redis(action="remove_all")
+
+            if self.redis_client:
+                await self.redis_client.aclose()
+
             if check_reload_loop is not None:
                 check_reload_loop.cancel()
                 try:
@@ -295,6 +376,7 @@ class Bot:
         """停止机器人"""
         self._running = False
         await self.registry.stop_all()
+        await self._update_service_list_in_redis(action="remove_all")
 
     def get_loop(self):
         return self._loop

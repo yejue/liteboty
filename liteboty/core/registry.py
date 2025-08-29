@@ -1,3 +1,4 @@
+import time
 import logging
 
 from typing import Dict, List
@@ -76,3 +77,17 @@ class ServiceRegistry:
     def has_service(self, service_name: str) -> bool:
         """检查服务是否存在"""
         return service_name in self._services
+
+    def get_services_status(self) -> List[Dict[str, any]]:
+        """获取所有服务的状态信息"""
+        services_status = []
+        for service in self._services.values():
+            status = {
+                "name": service.name,
+                "status": "running" if service._running else "stopped",
+                "start_time": getattr(service, '_start_time', None),
+                "uptime": time.time() - getattr(service, '_start_time', time.time()) if hasattr(service, '_start_time') else 0
+            }
+            services_status.append(status)
+        return services_status
+
