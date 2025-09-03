@@ -115,6 +115,14 @@ class Bot:
         handler = ConfigFileHandler(self)
         self.observer.schedule(handler, path=str(Path(config_path).parent.resolve()), recursive=False)
 
+        # service list refresh & TTL
+        self.service_update_interval = getattr(self.config, "SERVICE_LIST_UPDATE_INTERVAL", 15)
+        self.service_ttl_seconds = max(
+            getattr(self.config, "SERVICE_LIST_TTL_SECONDS", self.service_update_interval * 2),
+            30
+        )
+        self._service_update_task = None
+
     def _init_redis(self) -> None:
         """Initialize Redis connection for service list management"""
         try:
@@ -165,7 +173,8 @@ class Bot:
 
             # Store as JSON string in Redis
             await self.redis_client.set(service_key, json.dumps(service_list))
-            await self.redis_client.expire(service_key, 3600)  # Expire in 1 hour
+            # short TTL so it expires if bot crashes; kept alive by periodic refresh
+            await self.redis_client.expire(service_key, self.service_ttl_seconds)
             self.logger.debug(f"Updated liteboty service list in Redis: {len(service_list)} services")
 
         except Exception as e:
@@ -181,6 +190,15 @@ class Bot:
                 await self.reload_config()
                 self.need_to_reload = False
             await asyncio.sleep(0.5)
+
+    async def _service_list_updater(self) -> None:
+        """Periodically refresh service list in Redis to keep TTL alive"""
+        while self._running:
+            try:
+                await self._update_service_list_in_redis()
+            except Exception as e:
+                self.logger.error(f"Service list updater error: {e}")
+            await asyncio.sleep(self.service_update_interval)
 
     @staticmethod
     def _get_service_changes(old_config: BotConfig, new_config: BotConfig) -> Tuple[
@@ -340,6 +358,9 @@ class Bot:
             # Update service list after all services started
             await self._update_service_list_in_redis()
 
+            # start periodic refresh to keep 'liteboty:services' fresh with short TTL
+            self._service_update_task = asyncio.create_task(self._service_list_updater())
+
             check_reload_loop = asyncio.create_task(self._check_reload())
 
             # 保持运行直到收到停止信号
@@ -375,6 +396,12 @@ class Bot:
     async def stop(self) -> None:
         """停止机器人"""
         self._running = False
+        if self._service_update_task is not None:
+            self._service_update_task.cancel()
+            try:
+                await self._service_update_task
+            except asyncio.CancelledError:
+                pass
         await self.registry.stop_all()
         await self._update_service_list_in_redis(action="remove_all")
 

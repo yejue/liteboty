@@ -91,6 +91,10 @@ class BotConfig(BaseSettings):
     REDIS: RedisConfig = Field(default_factory=RedisConfig)
     LOGGING: LogConfig = Field(default_factory=LogConfig)
 
+    # runtime service list refresh/expiry (seconds)
+    SERVICE_LIST_UPDATE_INTERVAL: int = 15
+    SERVICE_LIST_TTL_SECONDS: int = 30
+
     # 支持新旧两种配置格式
     SERVICES: Union[List[str], Dict[str, ServiceItem]] = Field(default_factory=list)
     SERVICE_CONFIG: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
