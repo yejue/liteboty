@@ -269,6 +269,33 @@ class Service:
             self.logger.error(f"Error publishing data: {e}")
             raise
 
+    async def publish_alert(
+            self,
+            alert_type: str,
+            action: str = "create",
+            *,
+            severity: str = "medium",
+            title: Optional[str] = None,
+            description: Optional[str] = None,
+            alert_data: Optional[Dict[str, Any]] = None,
+            channel: str = "/alert",
+            extra: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Publish a normalized alert message to Redis channel"""
+        payload = {
+            "alert_type": alert_type,
+            "action": action,
+            "severity": severity,
+            "title": title or alert_type,
+            "description": description or "",
+            "alert_data": alert_data or {},
+            "service_name": self.name,
+            "timestamp": time.time(),
+        }
+        if extra:
+            payload["extra"] = extra
+        await self.publish(channel, payload, MessageType.JSON)
+
     async def publish_message(self, channel: str, message: Message) -> None:
         """发布自定义消息
 
