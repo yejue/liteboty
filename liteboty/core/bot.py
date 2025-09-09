@@ -17,6 +17,7 @@ from .config import BotConfig
 from .registry import ServiceRegistry
 from .exceptions import LiteBotyException
 from .utils import get_service_name_from_path
+from .process_service import ProcessServiceProxy
 
 
 class ConfigFileHandler(FileSystemEventHandler):
@@ -300,7 +301,23 @@ class Bot:
     async def _load_service(self, service_path: str) -> None:
         """加载单个服务，支持本地包和标准包，自动注册到 registry"""
         try:
-            # 1. 导入包，获取 service_entry
+            # 先根据路径取配置与名称
+            service_name = get_service_name_from_path(service_path)
+            service_config = self.config.get_service_config(service_name)
+
+            # 若配置要求在独立进程中运行，则注册为进程代理
+            if bool(service_config.get("run_in_separate_process", False)):
+                service = ProcessServiceProxy(
+                    service_path=service_path,
+                    service_name=service_name,
+                    config=service_config,
+                    global_config=self.config.model_dump(),
+                )
+                self.registry.register(service)
+                self.logger.info(f"Loaded service (process): {service_path}")
+                return
+
+            # 否则正常加载为当前进程内服务
             if service_path.startswith('.'):
                 package_name = service_path.lstrip('.')
                 sys.path.insert(0, str(Path.cwd()))
@@ -315,11 +332,6 @@ class Bot:
                 raise ImportError(f"Service 包 {service_path} 必须在 __init__.py 暴露 service_entry")
             service_class = getattr(module, "service_entry")
 
-            # 2. 用 service_name（包名）查 config
-            service_name = get_service_name_from_path(service_path)
-            service_config = self.config.get_service_config(service_name)
-
-            # 3. 实例化并注册
             service = service_class(config=service_config, global_config=self.config.model_dump())
             self.registry.register(service)
             self.logger.info(f"Loaded service: {service_path}")
